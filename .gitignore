@@ -1,5 +1,12 @@
-input/
-output/
+# Keep directory skeletons in Git, ignore actual input/output data
+input/**
+!input/**/
+!input/**/.gitkeep
+!input/README.md
+
+output/**
+!output/**/
+!output/**/.gitkeep
 
 .ipynb_checkpoints/
 __pycache__/
