@@ -1,0 +1,173 @@
+/mnt/home/rclark/projects/trpcage-cooling/
+│
+├── input/
+│
+│   ├── md/
+│   │   │
+│   │   ├── topology/
+│   │   │   └── test.gro
+│   │   │
+│   │   │   SOURCE
+│   │   │   /mnt/home/rclark/ceph/trpcage/tip4pice/output/aw03/test.gro
+│   │   │
+│   │   └── equilibrium-xtc/
+│   │       ├── trp_whole_dir0.xtc
+│   │       └── trp_whole_dir19.xtc
+│   │
+│   │       SOURCE ROOT
+│   │       /mnt/home/rclark/ceph/trpcage/tip4pice/output/aw03/xtc_files/
+│   │
+│   │       SOURCE FILES
+│   │       trp_whole_dir0.xtc
+│   │       trp_whole_dir19.xtc
+│   │
+│   ├── model-selection/
+│   │   └── vamp/
+│   │       ├── t50/
+│   │       ├── t100/
+│   │       ├── t150/
+│   │       ├── t200/
+│   │       └── t250/
+│   │
+│   │       RUSTY PATTERN
+│   │       input/model-selection/vamp/t{T}/
+│   │           scores-k-50-75-100-125-150-train.npy
+│   │           scores-k-50-75-100-125-150-test.npy
+│   │
+│   │       SOURCE PATTERN
+│   │       /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │       dec-01-no-state-4/all-dec01/minibatch-vamp/
+│   │       all-all-{T}-tica-reduced/
+│   │           scores-k-50-75-100-125-150-{train,test}.npy
+│   │
+│   │       T = 50, 100, 150, 200, 250
+│   │
+│   ├── state-model/
+│   │   └── t250_k50/
+│   │       │
+│   │       ├── cluster-centers/
+│   │       │   ├── cluster_016.pdb
+│   │       │   └── cluster_036.pdb
+│   │       │
+│   │       │   SOURCE ROOT
+│   │       │   /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │       │   dec-01-no-state-4/all-dec01/cluster-centers/
+│   │       │   centers/lag250/k50/pdbs_from_xtc/
+│   │       │
+│   │       ├── sampled-frames/
+│   │       │   └── sampled_frames.xtc
+│   │       │
+│   │       │   SOURCE
+│   │       │   /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │       │   dec-01-no-state-4/all-dec01/picked-frames/
+│   │       │   t-250-k-50/sampled_frames.xtc
+│   │       │
+│   │       ├── repex-dtrajs/
+│   │       │   ├── 230k-dtraj.h5
+│   │       │   ├── 232k-dtraj.h5
+│   │       │   ├── ...
+│   │       │   └── 277k-dtraj.h5
+│   │       │
+│   │       │   SOURCE ROOT
+│   │       │   /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │       │   dec-01-no-state-4/all-dec01/repex/
+│   │       │   t-250-k-50-dtrajs/
+│   │       │
+│   │       └── bmsm/
+│   │           └── lag400/
+│   │               ├── P-samples-lag-400.npz
+│   │               └── its-from-P-samples.npz
+│   │
+│   │               SOURCE ROOT
+│   │               /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │               dec-01-no-state-4/all-dec01/bmsm-repex-dec01/
+│   │               t-250-k-50-s-10-1000-custom/
+│   │
+│   ├── cooling/
+│   │   │
+│   │   ├── endpoints/
+│   │   │   │
+│   │   │   ├── manifests/
+│   │   │   │   ├── end-6e9-traj-list.txt
+│   │   │   │   ├── end-6e8-traj-list.txt
+│   │   │   │   ├── end-6e7-traj-list.txt
+│   │   │   │   └── end-6e6-traj-list.txt
+│   │   │   │
+│   │   │   │   SOURCE ROOT
+│   │   │   │   /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │   │   │   dec-01-no-state-4/
+│   │   │   │
+│   │   │   └── xtc/
+│   │   │       ├── 6e9/
+│   │   │       │   └── 7,550 cooling endpoint XTCs
+│   │   │       ├── 6e8/
+│   │   │       │   └── 7,550 cooling endpoint XTCs
+│   │   │       ├── 6e7/
+│   │   │       │   └── 13,539 cooling endpoint XTCs
+│   │   │       └── 6e6/
+│   │   │           └── 2,500 cooling endpoint XTCs
+│   │   │
+│   │   │       SOURCE
+│   │   │       whatever absolute paths are listed in the corresponding
+│   │   │       end-{rate}-traj-list.txt
+│   │   │
+│   │   │       RUSTY DESTINATION
+│   │   │       input/cooling/endpoints/xtc/{rate}/<original-basename>.xtc
+│   │   │
+│   │   │       The copied manifests should then be REWRITTEN to point here.
+│   │   │
+│   │   ├── pairs/
+│   │   │   ├── 6e9_pairs_t250_k50.npy
+│   │   │   ├── 2e9_pairs_t250_k50.npy
+│   │   │   ├── 6e8_pairs_t250_k50.npy
+│   │   │   ├── 2e8_pairs_t250_k50.npy
+│   │   │   ├── 6e7_pairs_t250_k50.npy
+│   │   │   ├── 2e7_pairs_t250_k50.npy
+│   │   │   └── 6e6_pairs_t250_k50.npy
+│   │   │
+│   │   │   SOURCE ROOT
+│   │   │   /mnt/home/rclark/ceph/trpcage/unbiased_results/
+│   │   │   dec-01-no-state-4/all-dec01/coolings/npy/t_250_k_50/
+│   │   │
+│   │   └── diagnostics/
+│   │       │
+│   │       ├── dtrajs/
+│   │       │   ├── split0_final_npy_t_250_k_50.h5
+│   │       │   ├── ...
+│   │       │   └── split14_final_npy_t_250_k_50.h5
+│   │       │
+│   │       │   SOURCE PATTERN
+│   │       │   /mnt/home/rclark/ceph/trpcage/changes_below_230k/
+│   │       │   split{0..14}_final_npy_t_250_k_50.h5
+│   │       │
+│   │       └── diffusion/
+│   │           └── diffusion-coefficients.csv
+│   │
+│   │           SOURCE
+│   │           /mnt/home/rclark/ceph/trpcage/
+│   │           boltzmann_freezing/tip4pice/fast_cooling/
+│   │           diffusion-coefficients.csv
+│   │
+│   └── README.md
+│
+├── output/
+│   ├── cooling-data-processing/
+│   ├── cooling-analysis/
+│   ├── free-energy-surface/
+│   ├── sasa/
+│   ├── fig-s1/
+│   ├── fig-s3/
+│   ├── fig-s5/
+│   ├── fig-s16/
+│   └── fig-s17/
+│
+├── compute-sasa.py
+├── cooling-data-processing.ipynb
+├── cooling-analysis.ipynb
+├── free-energy-surface.ipynb
+├── fig-s1.ipynb
+├── fig-s3.ipynb
+├── fig-s5.ipynb
+├── fig-s11.ipynb
+├── fig-s16.ipynb
+└── fig-s17.ipynb
