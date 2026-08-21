@@ -1,0 +1,19 @@
+# Environment for Figure 5, Figure S4 and Table S3.
+#
+# The tier-1 rebuild (`make figures`, from the tracked observables) needs only
+# numpy, scipy and matplotlib.  Everything below the marker is required solely
+# to re-derive the observables from coordinates (`make observables`/`verify`).
+name: cooling-fast-and-slow
+channels:
+  - conda-forge
+dependencies:
+  # --- tier 1: rebuild figures and tables from tracked observables ---
+  - python >=3.10
+  - numpy
+  - scipy
+  - matplotlib
+  # --- tier 2: re-derive observables from the Zenodo coordinates ---
+  - mdtraj          # chi1 dihedrals, endpoint XTC reading, DCD writing
+  - h5py            # repex dtrajs (single 'arr_00' dataset per file)
+  - loos            # Rg, Trp6 sidechain contacts, DCD writing for 230 K
+  - pyyaml          # reading pipeline-config.yaml provenance
