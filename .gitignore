@@ -12,3 +12,8 @@ output/**
 __pycache__/
 *.pyc
 .DS_Store
+
+# Derived data: the small observables are tracked, the rebuilt
+# coordinate sets are not.
+derived/cooled-by-state/
+derived/trex-230-by-state/
