@@ -169,11 +169,19 @@ filename is not importable. Non-imported scripts keep hyphens
 would let all of them use hyphens; that is a reasonable follow-up rather than
 something done here, to keep this branch's diff small.
 
+## Scope
+
+Preparing the Zenodo deposit is **not** part of this branch — that is handled
+separately. What this branch does is make the analysis rebuildable once the
+deposit exists, and record what the deposit has to contain for that to work.
+The staging warning in item 4 above is the one thing worth reading before the
+copying starts, since it is cheap to fix now and silently corrupting later.
+
 ## Open items
 
 - Zenodo DOI and per-file names are not yet assigned, so
-  `directory_structure.txt` additions cannot cite them. Placeholder until the
-  deposit is prepped.
+  `directory_structure.txt` additions cannot cite them yet. Whoever preps the
+  deposit supplies those.
 - A checksum manifest for the deposited files would give corruption detection,
   download verification, and the index-prefix mapping from item 4 in one CSV.
 - `build-trex-230-by-state.py` takes `--seed` (the Makefile passes one) because
