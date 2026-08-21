@@ -3,8 +3,8 @@
 
 Rebuilds the supplementary figure for the 50-state model: state index on x,
 temperature on y, colour is log10 of the histogrammed state population at that
-temperature. Follows the recipe in ../flux-and-ds.ipynb (cells 2-5), which did
-the same thing for the 100-state model, with two changes:
+temperature.  Follows the recipe previously applied to the 100-state model,
+with two changes:
 
   * the colour scale is log10(pi), not the natural log that np.log gives. Same
     picture, rescaled by 1/ln(10): the range runs about -5.1 .. -0.6 instead of
@@ -87,8 +87,8 @@ def add_colorbar(ax, im, label, fraction=COLORBAR_FRACTION, pad=COLORBAR_PAD,
 def load_trex_populations(dtraj_dir=DTRAJ_DIR, k=K_CHOICE):
     """Histogram each temperature's discrete trajectory over the k states.
 
-    Same construction as flux-and-ds.ipynb cell 3: bincount over the reassigned
-    dtraj, normalised by the number of frames at that temperature.
+    Bincount over the reassigned dtraj, normalised by the number of frames at
+    that temperature.
     """
     import h5py
 

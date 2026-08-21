@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Regenerate the chi1 / Rg / Trp6-contact figure panels with statistical errors.
 
-Self-contained replacement for cell 25 of figs-t250-k50.ipynb, written so the
-revised figure and the data behind it can be submitted together.  Addresses the
-referee comments on the submitted version (archived in ./submitted/):
+Figure 5: the multipanel observables comparing cooled ensembles against the
+277 K and 230 K equilibrium references.  Reads the tracked observables in
+derived/observables by default and recomputes them from coordinates on request.
+The presentation addresses the referee comments on the submitted version:
 
   1. cooling rates hard to separate  -> optional residual (delta-from-277 K)
      strips under panels A and B; see --ab-variant
@@ -50,9 +51,10 @@ compute_chi1 is atom-name-template based and unaffected.
 
 Usage
 -----
-    python make_revised_panels.py                 # plot from cached observables
-    python make_revised_panels.py --recompute     # re-read trajectories first
-    python make_revised_panels.py --ab-variant residual
+    python fig5_panels.py                 # plot from the tracked observables
+    python fig5_panels.py --recompute     # re-derive them from coordinates
+    python fig5_panels.py --stats-only    # numbers only, for the text
+    python fig5_panels.py --ab-variant residual
 """
 from __future__ import annotations
 
