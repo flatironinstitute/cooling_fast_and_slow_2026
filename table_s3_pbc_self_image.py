@@ -1,33 +1,14 @@
 #!/usr/bin/env python
 """Minimum-image safety audit over the frames behind the R_g / extent figures.
 
-For a solute of length M in a cubic box of edge L with van der Waals cutoff
-rvdw, the solute cannot see its own periodic image when
+For each frame, g is the smallest distance from any heavy atom to a periodic
+image of any other heavy atom of the same molecule.  A frame fails a tier when
+g <= margin.  Margin tiers run from the conventional box-sizing rule (two vdW
+cutoffs) down to hydrogen-bond range; there is no zero-margin tier, since zero
+clearance is coincidence of atom centres, not contact.
 
-    L > M + n * rvdw
-
-Tiers run from the conventional box-sizing rule (two cutoffs of padding) down
-through one cutoff, one solvation shell, van der Waals contact and hydrogen-bond
-range.  There is no zero-margin tier on purpose: zero clearance would mean atom
-centres coinciding with their own images, which no pair of van der Waals
-particles can reach.
-
-M is reported two ways.  The primary one is the largest per-axis extent
-max(x) - min(x), because the lattice is axis-aligned: a molecule lying along a
-box diagonal projects less onto every axis than its end-to-end length suggests,
-so it is the per-axis footprint that reaches the neighbouring image.  This is
-the one job an axis-aligned bounding box is right for -- it is not rotation
-invariant, and neither is the lattice.  The max pairwise heavy-atom separation
-is also tabulated as a conservative upper bound.
-
-Heavy atoms are LOOS `!hydrogen` over the whole molecule, L is that frame's box
-edge read from the trajectory, and rvdw comes from the .mdp used for these
-simulations (rvdw = 1.2 nm, vdw-type = cut-off, pbc = xyz; see
-input/md/unbiased_200ns.mdp).
-
-Counts are reported in absolute frames as well as pi-weighted fractions: the
-conformations that fail are rare enough that a weighted fraction rounds to zero
-while still corresponding to real frames.
+Counts are reported both absolutely and pi-weighted: failing conformations are
+rare enough that a weighted fraction can round to zero over real frames.
 
 Usage
 -----
@@ -43,7 +24,6 @@ import csv
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.distance import pdist
 
 import fig5_panels as base
 import paths
@@ -51,26 +31,18 @@ import paths
 # ── Simulation parameters (input/md/unbiased_200ns.mdp) ────────────────────────────
 RVDW = 12.0                   # Angstrom; mdp has rvdw = 1.2 nm
 N_CUTOFFS = 2                 # default console tier: margin = N_CUTOFFS * rvdw
-SOLVATION_SHELL = 3.75        # Angstrom; first-shell boundary, near the O-O first
-                              # minimum for the water model used here
-FIRST_SHELL_OUTER = 4.5       # Angstrom; the GENEROUS first-shell boundary -- the
-                              # first RDF minimum for apolar (carbon)-water rather
-                              # than the tighter O-O value.  Kept deliberately
-                              # loose: an ensemble clean at this distance is not
-                              # coming anywhere near its own hydration shell.
+SOLVATION_SHELL = 3.75        # Angstrom; O-O first-shell minimum, this water model
+FIRST_SHELL_OUTER = 4.5       # Angstrom; generous first shell: apolar carbon-water
+                              # RDF minimum rather than the tighter O-O value
 SECOND_SHELL = 6.0            # Angstrom; outer edge of the SECOND shell.  Not
-                              # 2 * SOLVATION_SHELL: shells are successive minima
-                              # in the protein-water RDF, not additive layers.
+                              # 2 * SOLVATION_SHELL: shells are successive RDF
+                              # minima, not additive layers
 VDW_CONTACT = 3.5             # Angstrom; two carbon vdW radii (1.7 + 1.7) touching
-SAVE_INTERVAL_PS = 100.0      # dt 0.002 ps x nstxtcout 50000, input/md/unbiased_200ns.mdp
 HBOND_HEAVY = 3.2             # Angstrom; N/O donor-acceptor heavy-atom separation
+SAVE_INTERVAL_PS = 100.0      # dt 0.002 ps x nstxtcout 50000, input/md/unbiased_200ns.mdp
 
-# Margin tiers for the report, most demanding first.  A margin is an absolute
-# clearance in Angstrom demanded between the solute and its nearest image, so
-# tiers set by a multiple of the cutoff and tiers set by a physical contact
-# distance sit in the same list.  There is deliberately no zero-margin tier: a
-# zero clearance is not contact but coincidence of atom centres with their own
-# images, which is far past any distance two van der Waals particles can reach.
+# Absolute clearances in Angstrom, most demanding first; cutoff multiples and
+# physical contact distances share the list.
 REPORT_MARGINS = (
     ('2 rvdw', 2 * RVDW),
     ('1 rvdw', 1 * RVDW),
@@ -82,213 +54,14 @@ REPORT_MARGINS = (
 )
 HEAVY_SELECTION = '!hydrogen'
 # sampled_frames.xtc was written without box information (it reports 0,0,0), so
-# frames from it fall back to this edge, measured from the cooled and T-REX
-# trajectories of the same system.  Rows using it are flagged in the table.
+# its frames fall back to this edge, measured from the cooled and T-REX
+# trajectories of the same system.  Rows using it are flagged.
 NOMINAL_BOX_EDGE = 47.2
 
+# Cache sits beside make_revised_panels, not beside this file, so a copy run
+# from elsewhere still finds it.
 CACHE_NPZ = paths.OBSERVABLES / 'table-s3-pbc-self-image.npz'
 OUT_DIR = paths.OUTPUT / 'table-s3-pbc-self-image'
-MDP = paths.ROOT / 'input' / 'md' / 'unbiased_200ns.mdp'
-
-
-def true_self_image_gap(coords, box_edge):
-    """Smallest distance between any atom and an IMAGE of another atom.
-
-    This is the quantity that decides whether the solute interacts with itself
-    across the boundary.  The per-axis and max-pairwise measures below are only
-    SCREENS on it: for the extreme pair along an axis the projected gap is
-    |L - M|, and a 3D distance is never smaller than one of its projections, so
-    |L - M| is a lower bound on this value.  It is a loose one, because the two
-    extreme atoms along x can be far apart in y and z -- which is why the
-    screens over-count violations, sometimes by a lot.
-    """
-    diff = coords[:, None, :] - coords[None, :, :]
-    imaged = diff - box_edge * np.round(diff / box_edge)
-    d_imaged = np.linalg.norm(imaged, axis=-1)
-    d_direct = np.linalg.norm(diff, axis=-1)
-    through_image = d_imaged < d_direct - 1e-9
-    return float(d_imaged[through_image].min()) if through_image.any() else np.inf
-
-
-def frame_extent_and_box(heavy, model):
-    """Per-frame (max pairwise M, largest per-axis extent, box edge) in Angstrom.
-
-    Two measures of "molecule length" because they answer different questions.
-    M is the max pairwise separation, rotation invariant and the conservative
-    choice.  The per-axis extent max(x)-min(x) over each axis is what actually
-    governs reaching a periodic image, because the periodicity is axis-aligned:
-    a molecule lying along a box diagonal projects less onto every axis than M
-    suggests.  This is the one job the axis-aligned bounding box is right for --
-    it is not rotation invariant, and neither is the lattice.
-    """
-    coords = heavy.getCoords()
-    box_edge = model.periodicBox()[0]
-    edge = box_edge if box_edge > 0 else NOMINAL_BOX_EDGE
-    return (pdist(coords).max(),
-            (coords.max(axis=0) - coords.min(axis=0)).max(),
-            box_edge,
-            true_self_image_gap(coords, edge))
-
-
-def scan_states(paths_by_state, topology=base.TOPOLOGY,
-                selection=HEAVY_SELECTION, n_states=base.N_STATES,
-                xtc_state_index=None):
-    """Raw per-frame extents and box edges, kept per state.
-
-    Raw values, not histograms: the audit counts individual rare frames, and
-    binning them would round the count.
-    """
-    import loos
-    from loos import pyloos as pl
-
-    model = loos.createSystem(str(topology))
-    heavy = loos.selectAtoms(model, selection)
-    extents = {s: [] for s in range(n_states)}
-    axials = {s: [] for s in range(n_states)}
-    boxes = {s: [] for s in range(n_states)}
-    trues = {s: [] for s in range(n_states)}
-
-    items = ([(None, paths_by_state)] if xtc_state_index is not None
-             else sorted(paths_by_state.items()))
-    for state_ix, path in items:
-        traj = pl.Trajectory(str(path), model)
-        frame_m, frame_a, frame_l, frame_t = [], [], [], []
-        for _ in traj:
-            m, a, l, t = frame_extent_and_box(heavy, model)
-            frame_m.append(m)
-            frame_a.append(a)
-            frame_l.append(l)
-            frame_t.append(t)
-        frame_m, frame_a, frame_l, frame_t = (
-            np.array(frame_m), np.array(frame_a), np.array(frame_l),
-            np.array(frame_t))
-
-        targets = ([(state_ix, slice(None))] if xtc_state_index is None else
-                   [(s, np.flatnonzero(xtc_state_index == s))
-                    for s in np.unique(xtc_state_index)])
-        for s, sel in targets:
-            extents[s].append(frame_m[sel])
-            axials[s].append(frame_a[sel])
-            boxes[s].append(frame_l[sel])
-            trues[s].append(frame_t[sel])
-    join = lambda d: {s: np.concatenate(v) if v else np.empty(0) for s, v in d.items()}
-    return join(extents), join(axials), join(boxes), join(trues)
-
-
-def compute(cooling_labels=base.COOLING_LABELS, cooled_dir=base.COOLED_DIR,
-            trex_dir=base.TREX_DIR, sampled_277=base.SAMPLED_277,
-            n_states=base.N_STATES, cache_npz=CACHE_NPZ):
-    payload = {}
-    sources = [(lab, {int(p.stem): p for p in sorted((cooled_dir / lab).iterdir())}, None)
-               for lab in cooling_labels]
-    sources.append(('230K', {int(p.stem): p for p in sorted(trex_dir.iterdir())}, None))
-    meta = np.loadtxt(sampled_277.parent / 'frame_metadata.txt', dtype=int)
-    sources.append(('277K', sampled_277, meta[:, 1]))
-
-    for key, paths, index in sources:
-        extents, axials, boxes, trues = scan_states(paths, n_states=n_states,
-                                                    xtc_state_index=index)
-        for s in range(n_states):
-            payload[f'{key}_extent_{s}'] = extents[s]
-            payload[f'{key}_axial_{s}'] = axials[s]
-            payload[f'{key}_box_{s}'] = boxes[s]
-            payload[f'{key}_true_{s}'] = trues[s]
-        print(f'  {key}: {sum(len(v) for v in extents.values())} frames')
-    cache_npz.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(cache_npz, **payload)
-    print(f'cached -> {cache_npz}')
-    return payload
-
-
-def fmt_prob(value):
-    """Probability without pretending to more or less precision than we have."""
-    if value <= 0.0:
-        return '0'
-    return f'{value:.3f}' if value >= 0.01 else f'{value:.2e}'
-
-
-def fmt_margin(margin):
-    """Margin in Angstrom without spurious rounding or trailing zeros."""
-    return f'{margin:.2f}'.rstrip('0').rstrip('.')
-
-
-def audit(obs, reps, margin, cooling_labels=base.COOLING_LABELS,
-          n_states=base.N_STATES, nominal_edge=NOMINAL_BOX_EDGE):
-    """One row per ensemble, under each measure of solute-image separation.
-
-    Every criterion is reduced to a per-frame GAP in Angstrom, so a frame fails
-    a tier when its gap does not exceed the margin:
-
-      true    the actual smallest distance from any atom to an image of another
-              atom.  This is the physical quantity.
-      axial   |L - (per-axis extent)|.  A lower bound on `true`, hence a
-              conservative screen that over-counts violations.
-      maxpair |L - (max pairwise separation)|.  A looser bound still.
-
-    The screens over-count because the two atoms furthest apart along an axis
-    need not be near each other in the other two, so the projected gap can be
-    far smaller than the distance it bounds.
-    """
-    rows = []
-    kinds = ('true', 'axial', 'maxpair')
-    for key in cooling_labels + base.REFERENCE_LABELS:
-        pi = reps[key].mean(axis=0)
-        n_total = 0
-        fails = {k: 0 for k in kinds}
-        weighted = {k: 0.0 for k in kinds}
-        tightest = {k: np.inf for k in kinds}
-        used_nominal = False
-        for s in range(n_states):
-            true_gap = obs[f'{key}_true_{s}']
-            if true_gap.size == 0:
-                continue
-            l = obs[f'{key}_box_{s}']
-            if not np.all(l > 0):
-                l = np.where(l > 0, l, nominal_edge)
-                used_nominal = True
-            gaps = {'true': true_gap,
-                    'axial': np.abs(l - obs[f'{key}_axial_{s}']),
-                    'maxpair': np.abs(l - obs[f'{key}_extent_{s}'])}
-            n_total += true_gap.size
-            for kind, gap in gaps.items():
-                fail = gap <= margin
-                fails[kind] += int(fail.sum())
-                weighted[kind] += pi[s] * fail.mean()
-                finite = gap[np.isfinite(gap)]
-                if finite.size:
-                    tightest[kind] = min(tightest[kind], finite.min())
-        row = dict(key=key, ensemble=base.PRETTY[key], n_frames=n_total)
-        for kind in kinds:
-            row[f'n_fail_{kind}'] = fails[kind]
-            row[f'pct_{kind}'] = 100.0 * fails[kind] / n_total if n_total else 0.0
-            row[f'pi_weighted_{kind}'] = weighted[kind]
-            row[f'min_gap_{kind}'] = tightest[kind]
-        row['box_from_file'] = not used_nominal
-        rows.append(row)
-    return rows
-
-
-def print_table(rows, margin, label='', nominal_edge=NOMINAL_BOX_EDGE):
-    print(f'\nsolute-image separation must exceed {fmt_margin(margin)} A'
-          + (f'   [{label}]' if label else ''))
-    for kind, what in (('true', 'TRUE minimum-image distance  <- the physical test'),
-                       ('axial', 'per-axis screen   |L - M|  (over-counts)'),
-                       ('maxpair', 'max-pairwise screen        (over-counts more)')):
-        print(f'  {what}')
-        head = (f"    {'ensemble':>10s} {'frames':>8s} {'fail':>7s} {'fail %':>8s} "
-                f"{'pi-weighted':>12s} {'min gap':>9s}  box")
-        print(head)
-        print('    ' + '-' * (len(head) - 4))
-        for r in rows:
-            print(f"    {r['ensemble']:>10s} {r['n_frames']:8d} "
-                  f"{r[f'n_fail_{kind}']:7d} {r[f'pct_{kind}']:8.3f} "
-                  f"{r[f'pi_weighted_{kind}']:12.5f} {r[f'min_gap_{kind}']:9.2f}  "
-                  f"{'file' if r['box_from_file'] else f'{nominal_edge:.1f} nom'}")
-        total_fail = sum(r[f'n_fail_{kind}'] for r in rows)
-        total = sum(r['n_frames'] for r in rows)
-        print(f"    -> {total_fail} of {total} frames fail "
-              f"({100.0 * total_fail / total:.3f}%)\n")
-
 
 CSV_HEADERS = {
     'ensemble': 'ensemble',
@@ -297,17 +70,18 @@ CSV_HEADERS = {
     'pct_true': 'percent_frames_failing_true',
     'pi_weighted_true': 'population_weighted_probability_failing_true',
     'min_gap_true': 'closest_true_solute_image_distance_angstrom',
-    'n_fail_axial': 'frames_failing_per_axis_screen',
-    'pct_axial': 'percent_frames_failing_per_axis_screen',
-    'pi_weighted_axial': 'population_weighted_probability_failing_per_axis_screen',
-    'min_gap_axial': 'smallest_per_axis_projected_gap_angstrom',
-    'n_fail_maxpair': 'frames_failing_max_pairwise_screen',
-    'pct_maxpair': 'percent_frames_failing_max_pairwise_screen',
-    'pi_weighted_maxpair': 'population_weighted_probability_failing_max_pairwise_screen',
-    'min_gap_maxpair': 'smallest_max_pairwise_projected_gap_angstrom',
-    'box_edge_read_from_trajectory': 'box_edge_read_from_trajectory',
     'box_from_file': 'box_edge_read_from_trajectory',
 }
+
+MD_COLUMNS = (
+    ('ensemble', 'Ensemble', '{}'),
+    ('n_frames', 'Frames analysed', '{:d}'),
+    ('n_fail_true', 'Frames failing', '{:d}'),
+    ('pct_true', 'Failing (% of frames)', '{:.3f}'),
+    ('pi_weighted_true', 'Failing ($P$)', '{:.5f}'),
+    ('min_gap_true', 'Closest approach (Å)', '{:.2f}'),
+    ('box_from_file', '$L$ source', '{}'),
+)
 
 TIER_MEANING = {
     '2 rvdw': 'the conventional box-sizing rule: a full cutoff of solvent '
@@ -344,27 +118,153 @@ TIER_MEANING = {
                      'SHORTER than van der Waals contact, not longer.',
 }
 
-MD_COLUMNS = [
-    ('ensemble', 'Ensemble', '{}'),
-    ('n_frames', 'Frames analysed', '{:d}'),
-    ('n_fail_true', 'Frames failing', '{:d}'),
-    ('pct_true', 'Failing (% of frames)', '{:.3f}'),
-    ('pi_weighted_true', 'Failing ($P$)', '{:.5f}'),
-    ('min_gap_true', 'Closest approach (Å)', '{:.2f}'),
-    ('box_from_file', '$L$ source', '{}'),
-]
+ENSEMBLE_TEX = {
+    '6e9': r'$6.4{\times}10^{9}$', '2e9': r'$2.7{\times}10^{9}$',
+    '6e8': r'$6.4{\times}10^{8}$', '2e8': r'$2.7{\times}10^{8}$',
+    '6e7': r'$6.4{\times}10^{7}$', '2e7': r'$2.7{\times}10^{7}$',
+    '6e6': r'$6.4{\times}10^{6}$',
+    '277K': r'277\,K', '230K': r'230\,K',
+}
 
 
-def _md_table(rows, nominal_edge=NOMINAL_BOX_EDGE):
-    header = '| ' + ' | '.join(c[1] for c in MD_COLUMNS) + ' |'
-    lines = [header, '|' + '|'.join(['---'] * len(MD_COLUMNS)) + '|']
+def true_self_image_gap(coords, box_edge):
+    """Smallest distance from any atom to an IMAGE of another atom."""
+    diff = coords[:, None, :] - coords[None, :, :]
+    imaged = diff - box_edge * np.round(diff / box_edge)
+    d_imaged = np.linalg.norm(imaged, axis=-1)
+    through_image = d_imaged < np.linalg.norm(diff, axis=-1) - 1e-9
+    return float(d_imaged[through_image].min()) if through_image.any() else np.inf
+
+
+def compute(cooling_labels=base.COOLING_LABELS, cooled_dir=base.COOLED_DIR,
+            trex_dir=base.TREX_DIR, sampled_277=base.SAMPLED_277,
+            topology=base.TOPOLOGY, n_states=base.N_STATES,
+            selection=HEAVY_SELECTION, nominal_edge=NOMINAL_BOX_EDGE,
+            cache_npz=CACHE_NPZ):
+    """Scan trajectories with LOOS; cache per-state box edges and self-image gaps.
+
+    Raw per-frame values, not histograms: the audit counts rare frames.
+    """
+    import loos
+    from loos import pyloos as pl
+
+    model = loos.createSystem(str(topology))
+    heavy = loos.selectAtoms(model, selection)
+
+    sources = [(lab, {int(p.stem): p for p in sorted((cooled_dir / lab).iterdir())}, None)
+               for lab in cooling_labels]
+    sources.append(('230K', {int(p.stem): p for p in sorted(trex_dir.iterdir())}, None))
+    meta = np.loadtxt(sampled_277.parent / 'frame_metadata.txt', dtype=int)
+    sources.append(('277K', sampled_277, meta[:, 1]))
+
+    payload = {}
+    for key, paths, index in sources:
+        boxes = {s: [] for s in range(n_states)}
+        gaps = {s: [] for s in range(n_states)}
+        for state_ix, path in ([(None, paths)] if index is not None
+                               else sorted(paths.items())):
+            frame_l, frame_g = [], []
+            for _ in pl.Trajectory(str(path), model):
+                edge = model.periodicBox()[0]
+                frame_l.append(edge)
+                frame_g.append(true_self_image_gap(
+                    heavy.getCoords(), edge if edge > 0 else nominal_edge))
+            frame_l, frame_g = np.array(frame_l), np.array(frame_g)
+            for s, sel in ([(state_ix, slice(None))] if index is None else
+                           [(s, np.flatnonzero(index == s))
+                            for s in np.unique(index)]):
+                boxes[s].append(frame_l[sel])
+                gaps[s].append(frame_g[sel])
+        cat = lambda v: np.concatenate(v) if v else np.empty(0)
+        n = 0
+        for s in range(n_states):
+            payload[f'{key}_box_{s}'] = cat(boxes[s])
+            payload[f'{key}_true_{s}'] = cat(gaps[s])
+            n += payload[f'{key}_true_{s}'].size
+        print(f'  {key}: {n} frames')
+    cache_npz.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(cache_npz, **payload)
+    print(f'cached -> {cache_npz}')
+    return payload
+
+
+def fmt_prob(value):
+    """Probability without pretending to more or less precision than we have."""
+    if value <= 0.0:
+        return '0'
+    return f'{value:.3f}' if value >= 0.01 else f'{value:.2e}'
+
+
+def fmt_prob_tex(value):
+    """Probability as LaTeX math, scientific below 1%."""
+    if value <= 0.0:
+        return '0'
+    if value >= 0.01:
+        return f'{value:.3f}'
+    exponent = int(np.floor(np.log10(value)))
+    return f'${value / 10 ** exponent:.1f}{{\\times}}10^{{{exponent}}}$'
+
+
+def fmt_margin(margin):
+    """Margin in Angstrom without spurious rounding or trailing zeros."""
+    return f'{margin:.2f}'.rstrip('0').rstrip('.')
+
+
+def audit(obs, reps, margin, cooling_labels=base.COOLING_LABELS,
+          reference_labels=base.REFERENCE_LABELS, pretty=base.PRETTY,
+          n_states=base.N_STATES):
+    """One row per ensemble: frames whose self-image gap fails `margin`."""
+    rows = []
+    for key in cooling_labels + reference_labels:
+        pi = reps[key].mean(axis=0)
+        n_total, n_fail, weighted, tightest, nominal = 0, 0, 0.0, np.inf, False
+        for s in range(n_states):
+            gap = obs[f'{key}_true_{s}']
+            if gap.size == 0:
+                continue
+            nominal |= not np.all(obs[f'{key}_box_{s}'] > 0)
+            fail = gap <= margin
+            n_total += gap.size
+            n_fail += int(fail.sum())
+            weighted += pi[s] * fail.mean()
+            finite = gap[np.isfinite(gap)]
+            if finite.size:
+                tightest = min(tightest, finite.min())
+        rows.append(dict(key=key, ensemble=pretty[key], n_frames=n_total,
+                         n_fail_true=n_fail,
+                         pct_true=100.0 * n_fail / n_total if n_total else 0.0,
+                         pi_weighted_true=weighted, min_gap_true=tightest,
+                         box_from_file=not nominal))
+    return rows
+
+
+def print_table(rows, margin, label='', nominal_edge=NOMINAL_BOX_EDGE):
+    """Console view of one margin tier."""
+    print(f'\nsolute-image separation must exceed {fmt_margin(margin)} A'
+          + (f'   [{label}]' if label else ''))
+    head = (f"    {'ensemble':>10s} {'frames':>8s} {'fail':>7s} {'fail %':>8s} "
+            f"{'pi-weighted':>12s} {'min gap':>9s}  box")
+    print(head)
+    print('    ' + '-' * (len(head) - 4))
     for r in rows:
-        cells = []
-        for key, _, fmt in MD_COLUMNS:
-            value = r[key]
-            if key == 'box_from_file':
-                value = 'trajectory' if value else f'{nominal_edge:.1f} Å nominal'
-            cells.append(fmt.format(value))
+        print(f"    {r['ensemble']:>10s} {r['n_frames']:8d} "
+              f"{r['n_fail_true']:7d} {r['pct_true']:8.3f} "
+              f"{r['pi_weighted_true']:12.5f} {r['min_gap_true']:9.2f}  "
+              f"{'file' if r['box_from_file'] else f'{nominal_edge:.1f} nom'}")
+    total_fail = sum(r['n_fail_true'] for r in rows)
+    total = sum(r['n_frames'] for r in rows)
+    print(f"    -> {total_fail} of {total} frames fail "
+          f"({100.0 * total_fail / total:.3f}%)\n")
+
+
+def md_table(rows, md_columns=MD_COLUMNS, nominal_edge=NOMINAL_BOX_EDGE):
+    """Markdown table of one margin tier, with an all-ensemble total."""
+    lines = ['| ' + ' | '.join(c[1] for c in md_columns) + ' |',
+             '|' + '|'.join(['---'] * len(md_columns)) + '|']
+    for r in rows:
+        cells = [fmt.format(('trajectory' if r[key] else f'{nominal_edge:.1f} Å nominal')
+                            if key == 'box_from_file' else r[key])
+                 for key, _, fmt in md_columns]
         lines.append('| ' + ' | '.join(cells) + ' |')
     total_fail = sum(r['n_fail_true'] for r in rows)
     total = sum(r['n_frames'] for r in rows)
@@ -378,17 +278,21 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
                     solvation_shell=SOLVATION_SHELL,
                     first_shell_outer=FIRST_SHELL_OUTER,
                     vdw_contact=VDW_CONTACT,
-                    save_interval_ps=SAVE_INTERVAL_PS):
+                    save_interval_ps=SAVE_INTERVAL_PS,
+                    tiers=REPORT_MARGINS, tier_meaning=TIER_MEANING,
+                    cooling_labels=base.COOLING_LABELS,
+                    reference_labels=base.REFERENCE_LABELS,
+                    pretty=base.PRETTY, short=base.SHORT):
     """A report someone can read without opening the script."""
-    keys = base.COOLING_LABELS + base.REFERENCE_LABELS
-    tiers = list(REPORT_MARGINS)
-    total_frames = sum(r['n_frames'] for r in rows_by_tier[tiers[0][0]])
-    closest = {r['key']: r['min_gap_true'] for r in rows_by_tier[tiers[0][0]]}
+    keys = cooling_labels + reference_labels
+    first = rows_by_tier[tiers[0][0]]
+    total_frames = sum(r['n_frames'] for r in first)
+    closest = {r['key']: r['min_gap_true'] for r in first}
 
     out = ['# Minimum-image self-interaction audit', '',
            'How close the peptide comes to its own periodic image, over exactly '
            'the frames behind the $R_g$ and maximum-separation figures.', '',
-           'Generated by `check_pbc_self_image.py`. Every frame in the cooled, '
+           'Generated by `table_s3_pbc_self_image.py`. Every frame in the cooled, '
            '277 K and 230 K sets is tested individually.',
            '', '## The observable', '',
            'For each frame, the smallest distance from any heavy atom to a '
@@ -415,8 +319,8 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
            '| Ensemble | Frames | Closest approach to own image (Å) |',
            '|---|---|---|']
     for key in keys:
-        row = next(r for r in rows_by_tier[tiers[0][0]] if r['key'] == key)
-        out.append(f'| {base.PRETTY[key]} | {row["n_frames"]} | '
+        row = next(r for r in first if r['key'] == key)
+        out.append(f'| {pretty[key]} | {row["n_frames"]} | '
                    f'{closest[key]:.2f} |')
     out += ['',
             f'Nothing anywhere approaches overlap: the tightest contact in '
@@ -435,7 +339,7 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
             '', '## Margin tiers', '']
     for label, margin in tiers:
         out.append(f'- **{label}** ($\\Delta = {fmt_margin(margin)}$ Å) — '
-                   f'{TIER_MEANING.get(label, "")}')
+                   f'{tier_meaning.get(label, "")}')
     out += ['', '## Summary', '',
             f'Every tier against every ensemble, out of {total_frames} frames '
             'analysed. **Each cell is $P$ (frames failing)**: the '
@@ -444,8 +348,7 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
             'failing frames in parentheses. The two are not redundant -- $P$ '
             'runs several-fold below the frame share because the offending '
             'conformations sit in sparsely populated extended states.', '',
-            '| Tier | $\\Delta$ (Å) | '
-            + ' | '.join(base.SHORT[k] for k in keys) + ' |',
+            '| Tier | $\\Delta$ (Å) | ' + ' | '.join(short[k] for k in keys) + ' |',
             '|---|---|' + '---|' * len(keys)]
     for label, margin in tiers:
         by_key = {r['key']: r for r in rows_by_tier[label]}
@@ -480,7 +383,7 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
             '', '## Per-tier detail', '']
     for label, margin in tiers:
         out += [f'### {label}  ($\\Delta = {fmt_margin(margin)}$ Å)', '',
-                _md_table(rows_by_tier[label]), '']
+                md_table(rows_by_tier[label], nominal_edge=nominal_edge), '']
     out += ['## Caveats', '',
             '- `sampled_frames.xtc` (277 K) was written without box information '
             '— it reports $(0,0,0)$ — so those frames use a nominal '
@@ -511,62 +414,36 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
     return '\n'.join(out)
 
 
-def fmt_prob_tex(value):
-    """Probability as LaTeX math, scientific below 1%."""
-    if value <= 0.0:
-        return '0'
-    if value >= 0.01:
-        return f'{value:.3f}'
-    exponent = int(np.floor(np.log10(value)))
-    mantissa = value / 10 ** exponent
-    return f'${mantissa:.1f}{{\\times}}10^{{{exponent}}}$'
+def render_latex(rows_by_tier, rvdw=RVDW,
+                 wrap_added=True, tiers=REPORT_MARGINS,
+                 ensemble_tex=ENSEMBLE_TEX,
+                 cooling_labels=base.COOLING_LABELS,
+                 reference_labels=base.REFERENCE_LABELS):
+    """One tabularx table sized to \\textwidth; the margin is the row label.
 
-
-ENSEMBLE_TEX = {
-    '6e9': r'$6.4{\times}10^{9}$', '2e9': r'$2.7{\times}10^{9}$',
-    '6e8': r'$6.4{\times}10^{8}$', '2e8': r'$2.7{\times}10^{8}$',
-    '6e7': r'$6.4{\times}10^{7}$', '2e7': r'$2.7{\times}10^{7}$',
-    '6e6': r'$6.4{\times}10^{6}$',
-    '277K': r'277\,K', '230K': r'230\,K',
-}
-TIER_TEX = {'2 rvdw': r'$2r_\mathrm{vdw}$', '1 rvdw': r'$1r_\mathrm{vdw}$',
-            'two solvation shells': 'two solvation shells',
-            'first shell, outer bound': 'first shell, outer',
-            'first shell': 'first shell', 'vdW contact': 'vdW contact',
-            'hydrogen bond': 'hydrogen bond'}
-
-
-def render_latex(rows_by_tier, rvdw=RVDW, save_interval_ps=SAVE_INTERVAL_PS,
-                 nominal_edge=NOMINAL_BOX_EDGE, wrap_added=True):
-    """One tabularx table of the corrected audit, sized to \\textwidth.
-
-    No tier-name column (the margin itself is the row label), tabularx so the
-    body spans the text block rather than sitting narrow under a full-width
-    caption, and \\small commented out.  Set
-    wrap_added=False to drop the \\add{} change-marking macro.
+    wrap_added=False drops the \\add{} change-marking macro from the caption.
     """
-    keys = base.COOLING_LABELS + base.REFERENCE_LABELS
-    tiers = list(REPORT_MARGINS)
-    total = sum(r['n_frames'] for r in rows_by_tier[tiers[0][0]])
-    closest = {r['key']: r['min_gap_true'] for r in rows_by_tier[tiers[0][0]]}
+    keys = cooling_labels + reference_labels
+    first = rows_by_tier[tiers[0][0]]
+    total = sum(r['n_frames'] for r in first)
+    closest = min(r['min_gap_true'] for r in first)
     n_ens = len(keys)
 
     caption = (
-        'Minimum-image self-interaction audit. For each frame, $g$ is the '
-        'smallest distance from any heavy atom to a periodic image of any other '
-        'heavy atom of the same peptide, minimised over all atom pairs and all '
-        'nonzero lattice vectors; a frame is counted when $g \\le \\Delta$. '
-        'Each cell gives the population-weighted probability that a conformation '
-        'drawn from that ensemble falls below the threshold, with the absolute '
-        f'number of such frames in parentheses, out of {total} frames analysed. '
-        'Thresholds are set by the van der Waals cutoff '
-        f'$r_\\mathrm{{vdw}} = {fmt_margin(rvdw)}$\\,\\AA\\ and twice it, the '
-        'second and first solvation shells, van der Waals contact and '
-        'hydrogen-bond range. The closest approach anywhere is '
-        f'{min(closest.values()):.2f}\\,\\AA, so no conformation comes near '
-        'overlapping its own image. Cooling rates are in K\\,s$^{-1}$. Counts '
-        'are lower bounds, since coordinates were written only every '
-        f'{save_interval_ps:.0f}\\,ps.')
+        '\\textbf{Minimum-image self-interaction at various thresholds.} '
+        'For each frame, $g$ is the smallest minimum-image distance from any '
+        'heavy atom to a periodic image of any other heavy atom of the same '
+        'peptide, so long as that distance is less than the direct '
+        '(non-periodic) distance between the atoms; a frame is counted when '
+        '$g \\le \\Delta$. Each cell gives the ensemble population-weighted '
+        'probability that a conformation drawn from that ensemble falls below '
+        'the threshold, with the absolute number of such frames in '
+        f'parentheses. This analysis was performed across the {total} frames '
+        'used to calculate the observables and record the state occupancies of '
+        'the cooling endpoints elsewhere in this work. The van der Waals '
+        f'cutoff was $r_\\mathrm{{vdw}} = {fmt_margin(rvdw)}$\\,\\AA. The '
+        'closest approach we see across any dataset is in one frame, at '
+        f'{closest:.2f}\\,\\AA. Cooling rates are in K\\,s$^{{-1}}$.')
     if wrap_added:
         caption = '\\add{' + caption + '}'
 
@@ -584,7 +461,7 @@ def render_latex(rows_by_tier, rvdw=RVDW, save_interval_ps=SAVE_INTERVAL_PS,
            r'fraction below threshold (raw frame count)} \\',
            r'    \cmidrule(l){2-' + str(1 + n_ens) + r'}',
            r'    $\Delta$ (\AA) & '
-           + ' & '.join(ENSEMBLE_TEX[k] for k in keys) + r' \\',
+           + ' & '.join(ensemble_tex[k] for k in keys) + r' \\',
            r'    \midrule']
     for label, margin in tiers:
         by_key = {r['key']: r for r in rows_by_tier[label]}
@@ -595,45 +472,43 @@ def render_latex(rows_by_tier, rvdw=RVDW, save_interval_ps=SAVE_INTERVAL_PS,
     return '\n'.join(out)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--recompute', action='store_true')
-    parser.add_argument('--rvdw', type=float, default=RVDW,
-                        help='van der Waals cutoff in Angstrom (default %(default)s)')
-    parser.add_argument('--n-cutoffs', type=float, default=N_CUTOFFS,
-                        help='console tier: margin is N * rvdw (default %(default)s)')
-    parser.add_argument('--margin', type=float,
-                        help='console tier: absolute clearance in Angstrom, '
-                             'overriding --n-cutoffs')
-    parser.add_argument('--csv', type=Path, help='also write the table as CSV')
-    parser.add_argument('--tex', type=Path,
-                        help='write the disaggregated summary as LaTeX booktabs '
-                             'tables for the supplement')
-    parser.add_argument('--no-add', action='store_true',
-                        help='omit the \\add{} change-marking macro from the '
-                             'LaTeX caption')
-    parser.add_argument('--md', type=Path,
-                        help='write a self-describing markdown report covering '
-                             'every margin tier in REPORT_MARGINS')
-    args = parser.parse_args()
+def main(rvdw=RVDW, n_cutoffs=N_CUTOFFS, tiers=REPORT_MARGINS,
+         cache_npz=CACHE_NPZ, csv_headers=CSV_HEADERS):
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--recompute', action='store_true')
+    p.add_argument('--rvdw', type=float, default=rvdw,
+                   help='van der Waals cutoff in Angstrom (default %(default)s)')
+    p.add_argument('--n-cutoffs', type=float, default=n_cutoffs,
+                   help='console tier: margin is N * rvdw (default %(default)s)')
+    p.add_argument('--margin', type=float,
+                   help='console tier: absolute clearance in Angstrom, '
+                        'overriding --n-cutoffs')
+    p.add_argument('--csv', type=Path, help='also write the table as CSV')
+    p.add_argument('--tex', type=Path, help='write the summary as a LaTeX table')
+    p.add_argument('--no-add', action='store_true',
+                   help='omit the \\add{} change-marking macro from the '
+                        'LaTeX caption')
+    p.add_argument('--md', type=Path,
+                   help='write a self-describing markdown report covering '
+                        'every margin tier')
+    args = p.parse_args()
 
-    if args.recompute or not CACHE_NPZ.is_file():
+    if args.recompute or not cache_npz.is_file():
         print('scanning trajectories (LOOS) ...')
-        obs = compute()
+        obs = compute(cache_npz=cache_npz)
     else:
-        obs = dict(np.load(CACHE_NPZ, allow_pickle=True))
-        print(f'loaded cache {CACHE_NPZ}')
+        obs = dict(np.load(cache_npz, allow_pickle=True))
+        print(f'loaded cache {cache_npz}')
 
     reps = base.load_population_replicates()
-    margin = (args.margin if args.margin is not None
-              else args.n_cutoffs * args.rvdw)
-    label = next((l for l, m in REPORT_MARGINS if abs(m - margin) < 1e-9), '')
+    margin = args.margin if args.margin is not None else args.n_cutoffs * args.rvdw
     rows = audit(obs, reps, margin)
-    print_table(rows, margin, label=label)
+    print_table(rows, margin,
+                label=next((l for l, m in tiers if abs(m - margin) < 1e-9), ''))
 
     if args.md or args.tex:
-        rows_by_tier = {label: audit(obs, reps, m) for label, m in REPORT_MARGINS}
+        rows_by_tier = {label: audit(obs, reps, m) for label, m in tiers}
         if args.md:
             args.md.write_text(render_markdown(rows_by_tier, rvdw=args.rvdw))
             print(f'wrote {args.md}')
@@ -644,11 +519,11 @@ def main():
 
     if args.csv:
         with args.csv.open('w', newline='') as fh:
-            writer = csv.DictWriter(fh, fieldnames=list(CSV_HEADERS.values()))
+            writer = csv.DictWriter(fh, fieldnames=list(csv_headers.values()))
             writer.writeheader()
             for r in rows:
-                writer.writerow({CSV_HEADERS[k]: v for k, v in r.items()
-                                 if k in CSV_HEADERS})
+                writer.writerow({csv_headers[k]: v for k, v in r.items()
+                                 if k in csv_headers})
         print(f'wrote {args.csv}')
 
 
