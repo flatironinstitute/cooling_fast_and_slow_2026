@@ -63,3 +63,8 @@ PIPELINE_CONFIG = DERIVED / "pipeline-config.yaml"
 # ── Derived products rebuilt from coordinates, not tracked (large) ───────────
 COOLED_BY_STATE = DERIVED / "cooled-by-state"
 TREX_230_BY_STATE = DERIVED / "trex-230-by-state"
+# 277 K analysed per state, rebuilt from the unbiased trajectories.  Not the
+# same as SAMPLED_FRAMES: that file is centred, rotated onto a common reference
+# and carries no box, so it cannot be used where orientation or the lattice
+# matters.  Figure 5 uses it because its observables are rotation invariant.
+SAMPLED_277K_BY_STATE = DERIVED / "sampled-277k-by-state"

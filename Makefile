@@ -30,6 +30,7 @@ S3_OUT      := output/table-s3-pbc-self-image/table-s3.tex
 
 COOLED_STAMP := derived/.cooled-by-state.stamp
 TREX_STAMP   := derived/.trex-230-by-state.stamp
+S277_STAMP   := derived/.sampled-277k-by-state.stamp
 
 .PHONY: all figures observables coordinates verify clean help
 .DEFAULT_GOAL := figures
@@ -38,7 +39,7 @@ all: figures
 
 help:
 	@echo "figures      rebuild Figure 5, Figure S4 and Table S3 from tracked observables"
-	@echo "coordinates  rebuild the per-state DCDs from the staged endpoint data"
+	@echo "coordinates  rebuild the per-state DCDs (cooled, 230 K, 277 K)"
 	@echo "observables  re-derive the observables from coordinates (overwrites tracked npz)"
 	@echo "verify       recompute and compare against tracked observables, no overwrite"
 	@echo "clean        remove generated figures and tables"
@@ -60,7 +61,7 @@ $(S3_OUT): $(S3_OBS) table_s3_pbc_self_image.py fig5_panels.py paths.py
 	    --csv $(dir $(S3_OUT))table-s3.csv
 
 # ── Tier 2: rebuild the coordinate-derived intermediates ─────────────────────
-coordinates: $(COOLED_STAMP) $(TREX_STAMP)
+coordinates: $(COOLED_STAMP) $(TREX_STAMP) $(S277_STAMP)
 
 $(COOLED_STAMP): build-cooled-by-state.py paths.py
 	$(PYTHON) build-cooled-by-state.py
@@ -68,6 +69,12 @@ $(COOLED_STAMP): build-cooled-by-state.py paths.py
 
 $(TREX_STAMP): build-trex-230-by-state.py paths.py
 	$(PYTHON) build-trex-230-by-state.py --seed $(SEED)
+	@touch $@
+
+# 277 K analysed per state.  sampled_frames.xtc cannot be used for table S3:
+# it is centred, rotated onto a common reference and carries no box.
+$(S277_STAMP): build-277k-by-state.py paths.py
+	$(PYTHON) build-277k-by-state.py
 	@touch $@
 
 # ── Tier 2: re-derive the observables themselves ─────────────────────────────

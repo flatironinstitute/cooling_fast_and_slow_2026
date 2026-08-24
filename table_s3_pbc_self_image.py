@@ -53,13 +53,12 @@ REPORT_MARGINS = (
     ('hydrogen bond', HBOND_HEAVY),
 )
 HEAVY_SELECTION = '!hydrogen'
-# sampled_frames.xtc was written without box information (it reports 0,0,0), so
-# its frames fall back to this edge, measured from the cooled and T-REX
-# trajectories of the same system.  Rows using it are flagged.
-NOMINAL_BOX_EDGE = 47.2
+# 277 K is read from a per-state set rebuilt from the source trajectories:
+# sampled_frames.xtc is centred, rotated onto a common reference and carries no
+# box, and the gap is not rotation invariant.  Every ensemble now supplies its
+# own per-frame box, so there is no fallback edge.
+SAMPLED_277K_BY_STATE = paths.SAMPLED_277K_BY_STATE
 
-# Cache sits beside make_revised_panels, not beside this file, so a copy run
-# from elsewhere still finds it.
 CACHE_NPZ = paths.OBSERVABLES / 'table-s3-pbc-self-image.npz'
 OUT_DIR = paths.OUTPUT / 'table-s3-pbc-self-image'
 
@@ -70,7 +69,6 @@ CSV_HEADERS = {
     'pct_true': 'percent_frames_failing_true',
     'pi_weighted_true': 'population_weighted_probability_failing_true',
     'min_gap_true': 'closest_true_solute_image_distance_angstrom',
-    'box_from_file': 'box_edge_read_from_trajectory',
 }
 
 MD_COLUMNS = (
@@ -80,7 +78,6 @@ MD_COLUMNS = (
     ('pct_true', 'Failing (% of frames)', '{:.3f}'),
     ('pi_weighted_true', 'Failing ($P$)', '{:.5f}'),
     ('min_gap_true', 'Closest approach (Å)', '{:.2f}'),
-    ('box_from_file', '$L$ source', '{}'),
 )
 
 TIER_MEANING = {
@@ -137,10 +134,9 @@ def true_self_image_gap(coords, box_edge):
 
 
 def compute(cooling_labels=base.COOLING_LABELS, cooled_dir=base.COOLED_DIR,
-            trex_dir=base.TREX_DIR, sampled_277=base.SAMPLED_277,
+            trex_dir=base.TREX_DIR, sampled_277_dir=SAMPLED_277K_BY_STATE,
             topology=base.TOPOLOGY, n_states=base.N_STATES,
-            selection=HEAVY_SELECTION, nominal_edge=NOMINAL_BOX_EDGE,
-            cache_npz=CACHE_NPZ):
+            selection=HEAVY_SELECTION, cache_npz=CACHE_NPZ):
     """Scan trajectories with LOOS; cache per-state box edges and self-image gaps.
 
     Raw per-frame values, not histograms: the audit counts rare frames.
@@ -151,36 +147,31 @@ def compute(cooling_labels=base.COOLING_LABELS, cooled_dir=base.COOLED_DIR,
     model = loos.createSystem(str(topology))
     heavy = loos.selectAtoms(model, selection)
 
-    sources = [(lab, {int(p.stem): p for p in sorted((cooled_dir / lab).iterdir())}, None)
-               for lab in cooling_labels]
-    sources.append(('230K', {int(p.stem): p for p in sorted(trex_dir.iterdir())}, None))
-    meta = np.loadtxt(sampled_277.parent / 'frame_metadata.txt', dtype=int)
-    sources.append(('277K', sampled_277, meta[:, 1]))
+    sources = [(lab, cooled_dir / lab) for lab in cooling_labels]
+    sources.append(('230K', trex_dir))
+    sources.append(('277K', sampled_277_dir))
 
     payload = {}
-    for key, paths, index in sources:
-        boxes = {s: [] for s in range(n_states)}
-        gaps = {s: [] for s in range(n_states)}
-        for state_ix, path in ([(None, paths)] if index is not None
-                               else sorted(paths.items())):
-            frame_l, frame_g = [], []
-            for _ in pl.Trajectory(str(path), model):
-                edge = model.periodicBox()[0]
-                frame_l.append(edge)
-                frame_g.append(true_self_image_gap(
-                    heavy.getCoords(), edge if edge > 0 else nominal_edge))
-            frame_l, frame_g = np.array(frame_l), np.array(frame_g)
-            for s, sel in ([(state_ix, slice(None))] if index is None else
-                           [(s, np.flatnonzero(index == s))
-                            for s in np.unique(index)]):
-                boxes[s].append(frame_l[sel])
-                gaps[s].append(frame_g[sel])
-        cat = lambda v: np.concatenate(v) if v else np.empty(0)
+    for key, directory in sources:
+        paths = {int(p.stem): p for p in sorted(directory.iterdir())}
         n = 0
         for s in range(n_states):
-            payload[f'{key}_box_{s}'] = cat(boxes[s])
-            payload[f'{key}_true_{s}'] = cat(gaps[s])
-            n += payload[f'{key}_true_{s}'].size
+            if s not in paths:
+                payload[f'{key}_box_{s}'] = np.empty(0)
+                payload[f'{key}_true_{s}'] = np.empty(0)
+                continue
+            edges, gaps = [], []
+            for _ in pl.Trajectory(str(paths[s]), model):
+                edge = model.periodicBox()[0]
+                if edge <= 0:
+                    raise ValueError(
+                        f'{paths[s]} carries no box. Every trajectory read here '
+                        'must, since the gap depends on the lattice.')
+                edges.append(edge)
+                gaps.append(true_self_image_gap(heavy.getCoords(), edge))
+            payload[f'{key}_box_{s}'] = np.array(edges)
+            payload[f'{key}_true_{s}'] = np.array(gaps)
+            n += len(gaps)
         print(f'  {key}: {n} frames')
     cache_npz.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache_npz, **payload)
@@ -217,12 +208,11 @@ def audit(obs, reps, margin, cooling_labels=base.COOLING_LABELS,
     rows = []
     for key in cooling_labels + reference_labels:
         pi = reps[key].mean(axis=0)
-        n_total, n_fail, weighted, tightest, nominal = 0, 0, 0.0, np.inf, False
+        n_total, n_fail, weighted, tightest = 0, 0, 0.0, np.inf
         for s in range(n_states):
             gap = obs[f'{key}_true_{s}']
             if gap.size == 0:
                 continue
-            nominal |= not np.all(obs[f'{key}_box_{s}'] > 0)
             fail = gap <= margin
             n_total += gap.size
             n_fail += int(fail.sum())
@@ -233,12 +223,11 @@ def audit(obs, reps, margin, cooling_labels=base.COOLING_LABELS,
         rows.append(dict(key=key, ensemble=pretty[key], n_frames=n_total,
                          n_fail_true=n_fail,
                          pct_true=100.0 * n_fail / n_total if n_total else 0.0,
-                         pi_weighted_true=weighted, min_gap_true=tightest,
-                         box_from_file=not nominal))
+                         pi_weighted_true=weighted, min_gap_true=tightest))
     return rows
 
 
-def print_table(rows, margin, label='', nominal_edge=NOMINAL_BOX_EDGE):
+def print_table(rows, margin, label=''):
     """Console view of one margin tier."""
     print(f'\nsolute-image separation must exceed {fmt_margin(margin)} A'
           + (f'   [{label}]' if label else ''))
@@ -250,20 +239,19 @@ def print_table(rows, margin, label='', nominal_edge=NOMINAL_BOX_EDGE):
         print(f"    {r['ensemble']:>10s} {r['n_frames']:8d} "
               f"{r['n_fail_true']:7d} {r['pct_true']:8.3f} "
               f"{r['pi_weighted_true']:12.5f} {r['min_gap_true']:9.2f}  "
-              f"{'file' if r['box_from_file'] else f'{nominal_edge:.1f} nom'}")
+              )
     total_fail = sum(r['n_fail_true'] for r in rows)
     total = sum(r['n_frames'] for r in rows)
     print(f"    -> {total_fail} of {total} frames fail "
           f"({100.0 * total_fail / total:.3f}%)\n")
 
 
-def md_table(rows, md_columns=MD_COLUMNS, nominal_edge=NOMINAL_BOX_EDGE):
+def md_table(rows, md_columns=MD_COLUMNS):
     """Markdown table of one margin tier, with an all-ensemble total."""
     lines = ['| ' + ' | '.join(c[1] for c in md_columns) + ' |',
              '|' + '|'.join(['---'] * len(md_columns)) + '|']
     for r in rows:
-        cells = [fmt.format(('trajectory' if r[key] else f'{nominal_edge:.1f} Å nominal')
-                            if key == 'box_from_file' else r[key])
+        cells = [fmt.format(r[key])
                  for key, _, fmt in md_columns]
         lines.append('| ' + ' | '.join(cells) + ' |')
     total_fail = sum(r['n_fail_true'] for r in rows)
@@ -273,7 +261,7 @@ def md_table(rows, md_columns=MD_COLUMNS, nominal_edge=NOMINAL_BOX_EDGE):
     return '\n'.join(lines)
 
 
-def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
+def render_markdown(rows_by_tier, rvdw=RVDW,
                     heavy_selection=HEAVY_SELECTION,
                     solvation_shell=SOLVATION_SHELL,
                     first_shell_outer=FIRST_SHELL_OUTER,
@@ -378,23 +366,22 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
             'differ because states are not sampled in proportion to $\\pi$. |',
             '| Closest approach (Å) | Smallest $g$ over every frame of that '
             'ensemble. Independent of tier. |',
-            '| $L$ source | Per-frame box edge. Taken from the trajectory, '
-            'except for 277 K where it is recovered from the source '
-            'trajectories (see the caveats). |',
             '', '## Per-tier detail', '']
     for label, margin in tiers:
         out += [f'### {label}  ($\\Delta = {fmt_margin(margin)}$ Å)', '',
-                md_table(rows_by_tier[label], nominal_edge=nominal_edge), '']
+                md_table(rows_by_tier[label]), '']
     out += ['## Caveats', '',
-            '- **277 K is computed from the source trajectories, not from '
-            '`sampled_frames.xtc`.** Those picked frames were centred and '
-            'rotated onto a common reference, and $g$ is not rotation '
-            'invariant, so they cannot be used here; the file also carries no '
-            'box. Both are recovered per frame from the unbiased trajectories '
-            'via `frame_metadata.txt`, a mapping verified exact to xtc '
-            'precision. The recovered box averages 46.61 Å (sd 0.08), not the '
-            '47.2 Å of the cooled and T-REX runs. Centring alone would have '
-            'been harmless: $g$ depends only on interatomic differences.',
+            '- **277 K is read from `sampled-277k-by-state/`, not from '
+            '`sampled_frames.xtc`.** The picked frames in that file were '
+            'centred and rotated onto a common reference, and $g$ is not '
+            'rotation invariant, so they cannot be used here; the file also '
+            'carries no box. `build-277k-by-state.py` pulls the same 50000 '
+            'frames straight from the unbiased trajectories via '
+            '`frame_metadata.txt`, a mapping verified exact to xtc precision, '
+            'keeping the original coordinates and per-frame box. That box '
+            'averages 46.61 Å (sd 0.08), not the 47.2 Å of the cooled and '
+            'T-REX runs. Centring alone would have been harmless: $g$ depends '
+            'only on interatomic differences.',
             '- The cooled and 230 K frames are bit-identical to their sources '
             '(4e-7 nm), so they need no such treatment.',
             '- The peptide is whole, not split across the boundary: in the most '

@@ -20,3 +20,6 @@ derived/trex-230-by-state/
 
 # Local backups of superseded derived data
 derived/**/*.pre*
+
+# 277 K per-state set, rebuilt from the unbiased trajectories
+derived/sampled-277k-by-state/
