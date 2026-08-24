@@ -17,3 +17,6 @@ __pycache__/
 # coordinate sets are not.
 derived/cooled-by-state/
 derived/trex-230-by-state/
+
+# Local backups of superseded derived data
+derived/**/*.pre*

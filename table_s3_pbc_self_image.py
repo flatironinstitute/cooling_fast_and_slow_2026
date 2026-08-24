@@ -378,17 +378,25 @@ def render_markdown(rows_by_tier, rvdw=RVDW, nominal_edge=NOMINAL_BOX_EDGE,
             'differ because states are not sampled in proportion to $\\pi$. |',
             '| Closest approach (Å) | Smallest $g$ over every frame of that '
             'ensemble. Independent of tier. |',
-            '| $L$ source | Per-frame box edge from the trajectory, or the '
-            f'nominal {nominal_edge:.1f} Å fallback. |',
+            '| $L$ source | Per-frame box edge. Taken from the trajectory, '
+            'except for 277 K where it is recovered from the source '
+            'trajectories (see the caveats). |',
             '', '## Per-tier detail', '']
     for label, margin in tiers:
         out += [f'### {label}  ($\\Delta = {fmt_margin(margin)}$ Å)', '',
                 md_table(rows_by_tier[label], nominal_edge=nominal_edge), '']
     out += ['## Caveats', '',
-            '- `sampled_frames.xtc` (277 K) was written without box information '
-            '— it reports $(0,0,0)$ — so those frames use a nominal '
-            f'{nominal_edge:.1f} Å edge measured from the cooled and T-REX '
-            'trajectories of the same system. The rows are flagged.',
+            '- **277 K is computed from the source trajectories, not from '
+            '`sampled_frames.xtc`.** Those picked frames were centred and '
+            'rotated onto a common reference, and $g$ is not rotation '
+            'invariant, so they cannot be used here; the file also carries no '
+            'box. Both are recovered per frame from the unbiased trajectories '
+            'via `frame_metadata.txt`, a mapping verified exact to xtc '
+            'precision. The recovered box averages 46.61 Å (sd 0.08), not the '
+            '47.2 Å of the cooled and T-REX runs. Centring alone would have '
+            'been harmless: $g$ depends only on interatomic differences.',
+            '- The cooled and 230 K frames are bit-identical to their sources '
+            '(4e-7 nm), so they need no such treatment.',
             '- The peptide is whole, not split across the boundary: in the most '
             'extended frame of each set the largest consecutive '
             'C$\\alpha$–C$\\alpha$ step is under 4.0 Å, and no frame anywhere '
