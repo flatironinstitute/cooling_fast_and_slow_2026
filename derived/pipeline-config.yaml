@@ -1,0 +1,309 @@
+# -------------------------------------------------------------------
+# Global MSM / cooling settings
+# -------------------------------------------------------------------
+k_choice: 50
+tica_lag: 250
+chosen_lag: 400
+lag_low: 10
+lag_high: 1000
+
+cooling_labels:
+  - "6e9"
+  - "2e9"
+  - "6e8"
+  - "2e8"
+  - "6e7"
+  - "2e7"
+  - "6e6"
+
+cooling_pretty_labels:
+  "6e9": "6.4 e9 K/s"
+  "2e9": "2.7 e9 K/s"
+  "6e8": "6.4 e8 K/s"
+  "2e8": "2.7 e8 K/s"
+  "6e7": "6.4 e7 K/s"
+  "2e7": "2.7 e7 K/s"
+  "6e6": "6.4 e6 K/s"
+
+# -------------------------------------------------------------------
+# MSM posterior configuration
+# -------------------------------------------------------------------
+msm:
+  base_100: "/mnt/home/rclark/ceph/trpcage/unbiased_results/dec-01-no-state-4/all-dec01/bmsm-repex-dec01"
+  base_99:  "/mnt/home/rclark/ceph/trpcage/unbiased_results/dec-01-no-state-4/all-dec01/bmsm-repex-dec01"
+  posterior_kind: "full"
+  excluded_states: [4]
+  missing_state_index: 4
+  allow_zero_embed: true
+
+# -------------------------------------------------------------------
+# Bootstrap / cooling reweighting settings
+# -------------------------------------------------------------------
+bootstrap:
+  pi_source: "tpm"
+  use_msm_pi: true
+  alpha_row: 1.0
+  row_prior_type: "self"
+  rng_seed: 42
+  n_boot: 2000
+  include_230k: true
+
+# -------------------------------------------------------------------
+# Filesystem paths
+# -------------------------------------------------------------------
+paths:
+  pairs_base: "/mnt/home/rclark/ceph/trpcage/unbiased_results/dec-01-no-state-4/all-dec01/coolings/npy/t_{tica_lag}_k_{k_choice}"
+  #stat_base: "/mnt/home/rclark/ceph/trpcage/unbiased_results/dihedral-chi1-chi2/stationary_dists_july1st"
+  #pi_230k: "/mnt/home/rclark/ceph/trpcage/msm_{k_choice}_states_reassigned_toclustering_sep25th/repex/230k-dtraj-stationary-distribution.npy"
+  #pi_277k: "/mnt/home/rclark/ceph/trpcage/msm_{k_choice}_states_reassigned_toclustering_sep25th/repex/277k-dtraj-stationary-distribution.npy"
+  cold_dtraj: "/mnt/home/rclark/ceph/trpcage/unbiased_results/dec-01-no-state-4/all-dec01/repex/t-{tica_lag}-k-{k_choice}-dtrajs/230k-dtraj.h5"
+  cold_dtraj_dataset: "arr_00"
+  repex_base: "/mnt/home/rclark/ceph/trpcage/unbiased_results/dec-01-no-state-4/all-dec01/repex/t-{tica_lag}-k-{k_choice}-dtrajs"
+  cluster_centers_template: "/mnt/home/rclark/ceph/trpcage/unbiased_results/dec-01-no-state-4/all-dec01/cluster-centers/centers/lag{tica_lag}/k{k_choice}/pdbs_from_xtc/cluster_{:03d}.pdb"
+  csv_dir: "csv"
+  svg_dir: "svg"
+
+  cold_dtraj_bootstrap:
+    enabled: true
+    n_boot: 2000
+    block_length: 500
+    tail_frames: null         # or an integer
+    rng_seed: 123
+    pseudocount: 1.0
+# -------------------------------------------------------------------
+# Kinetics heatmap configuration (unchanged here)
+# -------------------------------------------------------------------
+kinetics:
+  lagtime_ns: 40.0
+  time_unit: "ns"
+  tau_bucket_width_ns: 40.0
+  exclude_labs:
+    - "pi_230k"
+
+# -------------------------------------------------------------------
+# Macrostate plots
+# -------------------------------------------------------------------
+macroplots:
+  nmeta_list: [4, 5, 6, 7, 8, 9, 10]
+  threshold: 1.0e-3
+  use_equilibrium: true
+  n_boot: 5000
+  save_csv: true
+  pcca_use_mean_flux: true
+  pcca_per_sample: true
+  pcca_n_procs: 8
+  core_plot_enabled: true
+  core_threshold: 0.9
+  core_std_threshold: 0.05
+
+# -------------------------------------------------------------------
+# Ladder similarity configuration
+# -------------------------------------------------------------------
+ladder:
+  tmin: 230
+  tmax: 277
+  ladder_subdir: "."
+  temps_file: "/mnt/home/rclark/ceph/trpcage/tip4pice/aw03/temps.dat"
+
+# -------------------------------------------------------------------
+# FES micro overlay configuration
+# -------------------------------------------------------------------
+fes:
+  topology: "/mnt/home/rclark/ceph/trpcage/tip4pice/output/aw03/test.gro"
+  traj_230: "/mnt/home/rclark/ceph/trpcage/tip4pice/output/aw03/xtc_files/trp_whole_dir0.xtc"
+  traj_277: "/mnt/home/rclark/ceph/trpcage/tip4pice/output/aw03/xtc_files/trp_whole_dir19.xtc"
+  traj_mid: "/mnt/home/rclark/ceph/trpcage/tip4pice/output/aw03/xtc_files/trp_whole_dir83.xtc"
+
+  use_top_populated_refs: true
+  ref_top_n: 3
+  cold_top_n: 3
+
+  dtraj_subdir: "."
+  dtraj_230_name: "230k-dtraj.h5"
+  dtraj_277_name: "277k-dtraj.h5"
+
+  ref_state: 36
+  cold_state: 16
+
+  bins: 90
+  n_meta: 6
+  membership_threshold: 0.5
+
+  start_frame: 20000
+  stop_frame: null
+
+  micro_prob_threshold_277: 0.01
+  micro_center_method: modal
+
+# -------------------------------------------------------------------
+# Flux heatmap configuration (NEW geometry-in-inches system)
+# -------------------------------------------------------------------
+flux_heatmap:
+  enabled: true
+
+  # Which orderings to produce (produce all three)
+  orderings: ["l1", "l2", "da"]
+
+  # Baseline / exclusions (baseline excluded automatically)
+  baseline_label: "pi_277k"
+  exclude_labs: ["pi_230k"]
+
+  # Change metric + scaling
+  change_metric: "kl_qp_contrib"      # tvd_contrib | js_contrib | kl_qp_contrib | rel_change
+  heatmap_scale_mode: "symmetric"     # nonnegative | symmetric | minmax
+  vmax_percentile: 95
+  eps: 1.0e-12
+
+  # Colormap + labeling
+  cmap: "PRGn"
+  colorbar_label: "change contribution"
+
+  # Annotation controls (asymmetric CI bounds)
+  annotate: true
+  annotate_with_ci: false
+  annotate_fontsize: 6
+  annotate_decimals: 3
+
+
+  # Explicit column order
+  cooling_order:
+    - "6e9"
+    - "2e9"
+    - "6e8"
+    - "2e8"
+    - "6e7"
+    - "2e7"
+    - "6e6"
+
+  # Event-time settings (exclude-self hard enforced)
+  event_time:
+    lagtime_ns: 40.0
+    include_self_flux: false
+
+  # TPM sample selection + validation (STRICT)
+  tpm:
+    keys: null
+    key_pattern: "^pi_"
+    row_sum_tol: 1.0e-8
+    normalize_rows: false
+    zero_row_policy: "raise"
+
+  # Progressive bins in event_time (base width = 400 ns)
+  binning:
+    base_width_ns: 1000.0
+    group_size: 3
+    time_unit: "ns"
+
+  # Output
+  outputs:
+    write_files: true
+    svg_subdir: "flux_heatmap"
+
+  # Inch-locked geometry:
+  # data box size is EXACT; margins are added outside it.
+  plot_geometry:
+    data_width_in: 3.25
+    data_height_in: 4.80
+
+    margin_left_in: 1.20
+    margin_right_in: 0.20
+    margin_bottom_in: 1.10
+    margin_top_in: 0.25
+
+    # Colorbar panel used only in *_full.svg
+    colorbar_pad_in: 0.15
+    colorbar_width_in: 0.35
+
+    # Colorbar-only figure side margins
+    cbar_margin_left_in: 0.20
+    cbar_margin_right_in: 0.20
+
+    # Title padding (points)
+    title_pad_points: 18.0
+
+# -------------------------------------------------------------------
+# Plotting / colours configuration
+# -------------------------------------------------------------------
+plot:
+  vit_colors:
+    "6e9": "#fde725"
+    "2e9": "#90d743"
+    "6e8": "#35b779"
+    "2e8": "#21918c"
+    "6e7": "#31688e"
+    "2e7": "#443983"
+    "6e6": "#440154"
+    "277K": "tab:red"
+    "230K": "tab:blue"
+
+  # Full distribution (small multiples)
+  full:
+    nrows: 5
+    ymax_pad_frac: 0.06   # 6% headroom to stop cap/spine clipping
+    row_gap_in: 0.25   # try 0.12–0.25 depending on how “separated” you want rows
+    data_width_in: 6
+    data_height_in: 2.25
+
+    margins_in:
+      left: 0.60
+      right: 0.25
+      bottom: 0.55
+      top: 0.30
+
+  # Top-N (main figure)
+  top:
+    n_states: 9   # hard error if > k_choice
+    ymax_pad_frac: 0.10   # main figure: a touch more headroom
+
+    data_width_in: 3.2
+    data_height_in: 2.6
+
+    margins_in:
+      left: 0.70
+      right: 0.7
+      bottom: 0.70
+      top: 0.7
+
+  legend:
+    enabled: true
+    ncol: 4
+    fontsize: 6
+    handlelength: 1.2
+    handletextpad: 0.4
+    columnspacing: 0.8
+    borderpad: 0.2
+
+    # legend-only figure size (inches)
+    fig_width_in: 3
+    fig_height_in: 0.55
+
+ladder:
+  tmin: 230
+  tmax: 277
+  ladder_subdir: "."
+  temps_file: "/mnt/home/rclark/ceph/trpcage/tip4pice/aw03/temps.dat"
+  bootstrap_enabled: true
+  bootstrap_npz_path: /mnt/home/rclark/ceph/trpcage/analysis_msms/analysis-msm-02/grid-search/20260113/t-250-k-50/cooling_bootstraps/cooling_bootstraps_k50_t250_lag_400.npz
+  bootstrap_metric_percentiles: [2.5, 97.5]
+  bootstrap_label_key_map:
+    "6e9": "cooled_6e9"
+    "2e9": "cooled_2e9"
+    "6e8": "cooled_6e8"
+    "2e8": "cooled_2e8"
+    "6e7": "cooled_6e7"
+    "2e7": "cooled_2e7"
+    "6e6": "cooled_6e6"  
+  metric: kl
+  kl_epsilon: 1e-12
+  kl_log_y: true
+  kl_log_ymin: 1e-2
+  kl_ymax_pad_frac: 0.05
+  # NEW: inch-locked geometry for ladder similarity line plots
+  plot_geometry:
+    data_width_in: 3.2
+    data_height_in: 1.6
+
+    margin_left_in: 0.60
+    margin_right_in: 0.25
+    margin_bottom_in: 0.55
+    margin_top_in: 0.30

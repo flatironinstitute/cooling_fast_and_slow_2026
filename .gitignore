@@ -12,3 +12,14 @@ output/**
 __pycache__/
 *.pyc
 .DS_Store
+
+# Derived data: the small observables are tracked, the rebuilt
+# coordinate sets are not.
+derived/cooled-by-state/
+derived/trex-230-by-state/
+
+# Local backups of superseded derived data
+derived/**/*.pre*
+
+# 277 K per-state set, rebuilt from the unbiased trajectories
+derived/sampled-277k-by-state/
